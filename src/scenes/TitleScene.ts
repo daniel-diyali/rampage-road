@@ -1,7 +1,7 @@
 // First thing judges see, so it has to say what the game is and how to play
 // within a few seconds. Any key starts, so nobody gets stuck on a menu.
 import Phaser from "phaser";
-import { COLORS, TILE, VIEW_H, VIEW_W } from "../config";
+import { COLORS, PIXEL_SCALE, SPRITES, TILE, VIEW_H, VIEW_W } from "../config";
 import { HighScore } from "../systems/HighScore";
 
 export class TitleScene extends Phaser.Scene {
@@ -9,13 +9,20 @@ export class TitleScene extends Phaser.Scene {
     super("Title");
   }
 
+  /// Title is the first scene, so it loads every sprite once for the whole game.
+  preload(): void {
+    for (const key of SPRITES) this.load.image(key, `assets/sprites/${key}.png`);
+  }
+
+  /// NEAREST filtering keeps the scaled-up pixel art sharp instead of blurry.
   create(): void {
+    for (const key of SPRITES) this.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
     this.cameras.main.setBackgroundColor(COLORS.fieldA);
     this.drawStripes();
 
     const cx = VIEW_W / 2;
     const title = this.add
-      .text(cx, VIEW_H * 0.22, "RAMPAGE\nROAD", {
+      .text(cx, VIEW_H * 0.16, "RAMPAGE\nROAD", {
         fontFamily: "monospace",
         fontSize: "64px",
         fontStyle: "bold",
@@ -27,16 +34,19 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.tweens.add({ targets: title, scale: 1.05, duration: 700, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
 
-    this.label(cx, VIEW_H * 0.4, "A cougar loose on the Palouse.\nUnleash the beast.", 18);
+    this.label(cx, VIEW_H * 0.34, "A cougar loose on the Palouse.\nUnleash the beast.", 18);
     this.label(
       cx,
-      VIEW_H * 0.58,
+      VIEW_H * 0.62,
       "ARROWS / WASD  hop\nHUNT jackrabbits + CLOSE CALLS  build rage\nSPACE at 100%  UNLEASH\nDon't let animal control catch you",
       16,
     );
 
+    const cougar = this.add.image(cx, VIEW_H * 0.485, "cougar").setScale(PIXEL_SCALE * 2);
+    this.tweens.add({ targets: cougar, y: cougar.y - 8, duration: 400, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+
     const best = HighScore.get();
-    if (best > 0) this.label(cx, VIEW_H * 0.74, `YOUR BEST: ${best}`, 22, "#ffe066");
+    if (best > 0) this.label(cx, VIEW_H * 0.76, `YOUR BEST: ${best}`, 22, "#ffe066");
 
     const prompt = this.label(cx, VIEW_H * 0.86, "PRESS ANY KEY", 24);
     this.tweens.add({ targets: prompt, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
@@ -45,10 +55,12 @@ export class TitleScene extends Phaser.Scene {
     this.input.once("pointerdown", () => this.startGame());
   }
 
-  /// Field rows in the background so the title already looks like the game.
+  /// Wheat rows in the background so the title already looks like the game.
   private drawStripes(): void {
-    for (let y = 0; y < VIEW_H; y += TILE * 2) {
-      this.add.rectangle(VIEW_W / 2, y + TILE / 2, VIEW_W, TILE, COLORS.fieldB);
+    for (let y = 0, i = 0; y < VIEW_H; y += TILE, i++) {
+      this.add
+        .tileSprite(VIEW_W / 2, y + TILE / 2, VIEW_W / PIXEL_SCALE, 32, i % 2 === 0 ? "fieldA" : "fieldB")
+        .setScale(PIXEL_SCALE);
     }
   }
 

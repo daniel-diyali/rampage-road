@@ -1,14 +1,14 @@
 // Jackrabbits replace static snacks. The cougar is a predator, so rage comes from
 // chasing prey down and cornering it, not just walking over a pickup.
 import Phaser from "phaser";
-import { COLS, COLORS, TILE, TUNING, colX, rowY } from "../config";
+import { COLS, PIXEL_SCALE, TUNING, colX, rowY } from "../config";
 import type { Lane } from "../types";
 import type { LaneManager } from "./LaneManager";
 
 interface Rabbit {
   row: number;
   col: number;
-  body: Phaser.GameObjects.Container;
+  body: Phaser.GameObjects.Image;
   cooldown: number;
 }
 
@@ -32,11 +32,7 @@ export class PreyManager {
     const free = [...Array(COLS).keys()].filter((c) => !lane.blockers.has(c));
     const col = Phaser.Utils.Array.GetRandom(free) as number;
 
-    const bodyPart = this.scene.add.rectangle(0, 0, TILE * 0.4, TILE * 0.3, COLORS.rabbit).setStrokeStyle(2, COLORS.outline);
-    const earL = this.scene.add.rectangle(-5, -12, 4, 10, COLORS.rabbit);
-    const earR = this.scene.add.rectangle(5, -12, 4, 10, COLORS.rabbit);
-    const tail = this.scene.add.rectangle(0, 8, 6, 6, COLORS.rabbitTail);
-    const body = this.scene.add.container(colX(col), rowY(lane.row), [tail, bodyPart, earL, earR]).setDepth(4);
+    const body = this.scene.add.image(colX(col), rowY(lane.row), "rabbit").setScale(PIXEL_SCALE).setDepth(4);
     this.rabbits.push({ row: lane.row, col, body, cooldown: 0 });
   }
 
@@ -76,7 +72,7 @@ export class PreyManager {
     if (!r) return false;
     this.rabbits = this.rabbits.filter((x) => x !== r);
     this.scene.tweens.killTweensOf(r.body);
-    this.scene.tweens.add({ targets: r.body, scale: 2, alpha: 0, duration: 180, onComplete: () => r.body.destroy() });
+    this.scene.tweens.add({ targets: r.body, scale: PIXEL_SCALE * 2, alpha: 0, duration: 180, onComplete: () => r.body.destroy() });
     return true;
   }
 

@@ -1,7 +1,7 @@
 // The scene only coordinates: lanes, rage, and the HUD each live in their own class.
 // What stays here is the cougar itself, input, collisions, and the camera.
 import Phaser from "phaser";
-import { COLS, COLORS, TILE, TUNING, VIEW_H, VIEW_W, colX, rowY } from "../config";
+import { COLS, COLORS, PIXEL_SCALE, TILE, TUNING, VIEW_H, VIEW_W, colX, rowY } from "../config";
 import type { Lane, Mover, VehicleKind } from "../types";
 import { LaneManager } from "../world/LaneManager";
 import { PreyManager } from "../world/PreyManager";
@@ -13,8 +13,6 @@ import { HighScore } from "../systems/HighScore";
 
 const TUTORIAL =
   "ARROWS / WASD to hop\nHunt JACKRABBITS + get CLOSE CALLS for RAGE\nSPACE at 100% to UNLEASH\nAnimal control is right behind you...";
-// Slightly smaller than the cougar so near-touches feel fair instead of cheap.
-const HIT_RANGE = TILE * 0.2;
 
 export class GameScene extends Phaser.Scene {
   private lanes!: LaneManager;
@@ -27,7 +25,11 @@ export class GameScene extends Phaser.Scene {
   /** Hop squash is tweened separately so it can stack on top of the rage size. */
   private squash = { x: 1, y: 1 };
   private freezeUntil = 0;
-  private player!: Phaser.GameObjects.Rectangle;
+  /** A hop pressed mid-air is remembered and played on landing, so fast inputs never get eaten. */
+  private queuedHop: [number, number] | null = null;
+  /** When the cougar first touched water with no log under it; null while safe. */
+  private splashStart: number | null = null;
+  private player!: Phaser.GameObjects.Image;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private closeCalls!: WeakSet<Mover>;
   private col = 0;
@@ -58,6 +60,8 @@ export class GameScene extends Phaser.Scene {
     this.closeCalls = new WeakSet();
     this.squash = { x: 1, y: 1 };
     this.freezeUntil = 0;
+    this.queuedHop = null;
+    this.splashStart = null;
     this.fx = new Effects(this);
 
     this.prey = new PreyManager(this);
@@ -66,10 +70,7 @@ export class GameScene extends Phaser.Scene {
     this.lanes.ensureRange(-6, TUNING.lanesAhead);
     this.rage = new RageMeter();
 
-    this.player = this.add
-      .rectangle(colX(this.col), rowY(this.row), TILE * 0.7, TILE * 0.7, COLORS.cougar)
-      .setStrokeStyle(3, COLORS.cougarOutline)
-      .setDepth(10);
+    this.player = this.add.image(colX(this.col), rowY(this.row), "cougar").setScale(PIXEL_SCALE).setDepth(10);
 
     this.van = new AnimalControl(this, this.player.x);
 
@@ -125,15 +126,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   /// SPACE is checked even mid-hop so unleashing never feels laggy.
+  /// A direction pressed mid-hop is queued instead of dropped.
   private handleInput(): void {
     const k = this.keys;
     const pressed = Phaser.Input.Keyboard.JustDown;
     if (pressed(k.SPACE) && this.rage.unleash()) this.playUnleashFx();
-    if (this.hopping) return;
-    if (pressed(k.UP) || pressed(k.W)) this.tryHop(0, 1);
-    else if (pressed(k.DOWN) || pressed(k.S)) this.tryHop(0, -1);
-    else if (pressed(k.LEFT) || pressed(k.A)) this.tryHop(-1, 0);
-    else if (pressed(k.RIGHT) || pressed(k.D)) this.tryHop(1, 0);
+
+    let dir: [number, number] | null = null;
+    if (pressed(k.UP) || pressed(k.W)) dir = [0, 1];
+    else if (pressed(k.DOWN) || pressed(k.S)) dir = [0, -1];
+    else if (pressed(k.LEFT) || pressed(k.A)) dir = [-1, 0];
+    else if (pressed(k.RIGHT) || pressed(k.D)) dir = [1, 0];
+    if (!dir) return;
+
+    if (this.hopping) this.queuedHop = dir;
+    else this.tryHop(dir[0], dir[1]);
   }
 
   /// While unleashed, forward hops become pounces that cover two rows,
@@ -150,6 +157,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.hideMessage();
     this.hopping = true;
     this.onLog = false;
+    this.splashStart = null;
     this.squash = { x: 0.8, y: 1.25 };
     this.tweens.add({
       targets: this.player,
@@ -177,6 +185,12 @@ export class GameScene extends Phaser.Scene {
       this.fx.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
       this.fx.burst(this.player.x, this.player.y, COLORS.rabbit, 8, 30, 5);
     }
+
+    this.checkCollisions(this.time.now);
+    if (this.dead || !this.queuedHop) return;
+    const [dc, dr] = this.queuedHop;
+    this.queuedHop = null;
+    this.tryHop(dc, dr);
   }
 
   private playUnleashFx(): void {
@@ -190,16 +204,19 @@ export class GameScene extends Phaser.Scene {
   /// The pulsing red screen tint makes it obvious to anyone watching that rage is on.
   private updateRage(dt: number): void {
     this.rage.update(dt);
-    const s = this.rage.scale;
+    const s = this.rage.scale * PIXEL_SCALE;
     this.player.setScale(s * this.squash.x, s * this.squash.y);
-    this.player.setFillStyle(this.rage.unleashed ? COLORS.rageGlow : COLORS.cougar);
+    if (this.rage.unleashed) this.player.setTint(COLORS.rageGlow);
+    else this.player.clearTint();
     const pulse = 0.08 + Math.sin(this.time.now / 120) * 0.04;
     this.rageTint.setAlpha(this.rage.unleashed ? pulse : 0);
   }
 
+  /// Vehicle hitboxes are trimmed at both ends so only a real overlap counts as a hit.
   /// A vehicle that just barely passed the cougar counts as a close call and gives rage,
   /// which rewards risky crossings. Each vehicle can only give one close call.
   /// Nothing is checked mid-hop: once you commit to a hop, the lane you left can't kill you.
+  /// Water gets a short grace period (coyote time) so a log that's *just* arriving still saves you.
   private checkCollisions(time: number): void {
     const lane = this.lanes.get(this.row);
     if (!lane || this.hopping) return;
@@ -207,15 +224,15 @@ export class GameScene extends Phaser.Scene {
 
     if (lane.type === "road" || lane.type === "rail") {
       for (const m of [...lane.movers]) {
-        const gap = Math.abs(m.body.x - px) - m.body.width / 2;
+        const gap = Math.abs(m.body.x - px) - (m.body.displayWidth / 2 - TUNING.vehicleTrim);
         const kind = m.kind as VehicleKind;
-        if (gap < HIT_RANGE) {
+        if (gap < TUNING.playerHalfWidth) {
           if (this.rage.canSmash(kind)) this.smash(lane, m, kind, time);
           else return this.die(kind === "train" ? "FLATTENED BY A TRAIN" : "ROADKILL");
           continue;
         }
         const alreadyPassed = (m.body.x - px) * lane.dir > 0;
-        if (alreadyPassed && gap < HIT_RANGE + TUNING.closeCallRange && !this.closeCalls.has(m)) {
+        if (alreadyPassed && gap < TUNING.playerHalfWidth + TUNING.closeCallRange && !this.closeCalls.has(m)) {
           this.closeCalls.add(m);
           this.rage.add(TUNING.ragePerCloseCall);
           this.fx.floatText(px, this.player.y - TILE / 2, "CLOSE CALL!", "#ffe066");
@@ -224,8 +241,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (lane.type === "river") {
-      this.onLog = lane.movers.some((m) => Math.abs(m.body.x - px) < m.body.width / 2);
-      if (!this.onLog) this.die("SPLASH");
+      this.onLog = lane.movers.some((m) => Math.abs(m.body.x - px) < m.body.displayWidth / 2 + TUNING.logGrace);
+      if (this.onLog) {
+        this.splashStart = null;
+      } else {
+        this.splashStart ??= time;
+        if (time - this.splashStart >= TUNING.splashGraceMs) this.die("SPLASH");
+      }
     }
   }
 
@@ -238,7 +260,7 @@ export class GameScene extends Phaser.Scene {
     this.bonus += points;
     this.cameras.main.shake(140, 0.008);
     this.freezeUntil = time + TUNING.hitStopMs;
-    this.fx.burst(m.body.x, m.body.y, m.body.fillColor, 10, 60, 7);
+    this.fx.burst(m.body.x, m.body.y, COLORS[kind], 10, 60, 7);
 
     const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
     this.fx.floatText(m.body.x, m.body.y - TILE / 2, label, "#ffffff");
@@ -281,11 +303,12 @@ export class GameScene extends Phaser.Scene {
     if (this.dead) return;
     this.dead = true;
     this.tweens.killTweensOf(this.player);
-    this.player.setFillStyle(COLORS.dead);
+    this.player.setTint(COLORS.dead);
     this.rageTint.setAlpha(0);
     this.cameras.main.shake(350, 0.015);
     this.fx.burst(this.player.x, this.player.y, COLORS.cougar, 12, 50, 6);
 
+    this.hud.update(this.rage.percent, false, false, this.score);
     const newBest = HighScore.submit(this.score);
     if (newBest) this.hud.setBest(this.score);
     const bestLine = newBest ? "NEW BEST!" : `BEST ${HighScore.get()}`;

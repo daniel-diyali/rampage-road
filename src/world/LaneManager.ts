@@ -1,7 +1,7 @@
 // Lanes are generated just ahead of the player and destroyed behind them,
 // so the road is endless without memory growing forever.
 import Phaser from "phaser";
-import { COLS, COLORS, TILE, VIEW_W, colX, rowY } from "../config";
+import { CAR_TINTS, COLS, COLORS, PIXEL_SCALE, TILE, VIEW_W, colX, rowY } from "../config";
 import type { Lane, LaneType, Mover, MoverKind } from "../types";
 
 export class LaneManager {
@@ -33,7 +33,10 @@ export class LaneManager {
     const lane: Lane = {
       row: r,
       type,
-      bg: this.scene.add.rectangle(VIEW_W / 2, rowY(r), VIEW_W, TILE, this.laneColor(type, r)).setDepth(0),
+      bg: this.scene.add
+        .tileSprite(VIEW_W / 2, rowY(r), VIEW_W / PIXEL_SCALE, 32, this.laneTexture(type, r))
+        .setScale(PIXEL_SCALE)
+        .setDepth(0),
       movers: [],
       blockers: new Set(),
       decor: [],
@@ -67,9 +70,10 @@ export class LaneManager {
   }
 
   /// Alternating field shades make each row easy to count.
-  private laneColor(type: LaneType, r: number): number {
-    if (type === "field") return r % 2 === 0 ? COLORS.fieldA : COLORS.fieldB;
-    return COLORS[type];
+  private laneTexture(type: LaneType, r: number): string {
+    if (type === "field") return r % 2 === 0 ? "fieldA" : "fieldB";
+    if (type === "river") return "water";
+    return type;
   }
 
   /// Rows behind the start are solid hay so the player can't wander off the bottom.
@@ -79,7 +83,8 @@ export class LaneManager {
     while (lane.blockers.size < baleCount) lane.blockers.add(Phaser.Math.Between(0, COLS - 1));
 
     for (const c of lane.blockers) {
-      lane.decor.push(this.scene.add.rectangle(colX(c), rowY(r), TILE * 0.75, TILE * 0.6, COLORS.hay).setDepth(5));
+      const prop = Math.random() < 0.6 ? "bale" : "sage";
+      lane.decor.push(this.scene.add.image(colX(c), rowY(r), prop).setScale(PIXEL_SCALE).setDepth(5));
     }
 
     this.onField(lane);
@@ -117,29 +122,29 @@ export class LaneManager {
       .setDepth(7)
       .setVisible(false);
     lane.decor.push(lane.warning);
-    for (let i = 0; i < COLS * 2; i++) {
-      lane.decor.push(this.scene.add.rectangle(i * (TILE / 2) + TILE / 4, y, 6, TILE * 0.8, COLORS.railTie).setDepth(1));
-    }
   }
 
   /// Decides what kind of mover a lane gets and how wide it is.
   private pickMover(lane: Lane): { kind: MoverKind; w: number } {
     if (lane.type === "road") {
       const kind: MoverKind = Math.random() < 0.3 ? "truck" : "car";
-      return { kind, w: kind === "truck" ? TILE * 2 : TILE * 0.95 };
+      return { kind, w: kind === "truck" ? TILE * 2 : TILE };
     }
     if (lane.type === "river") return { kind: "log", w: TILE * lane.logTiles };
     return { kind: "train", w: TILE * 12 };
   }
 
   /// With no x given, the mover starts just offscreen on the side it drives in from.
+  /// Sprites face right, so left-moving lanes flip them.
   private spawn(lane: Lane, kind: MoverKind, w: number, atX?: number): void {
     const x = atX ?? (lane.dir > 0 ? -w / 2 : VIEW_W + w / 2);
-    const h = kind === "log" ? TILE * 0.7 : TILE * 0.8;
+    const texture = kind === "log" ? `log${lane.logTiles}` : kind;
     const body = this.scene.add
-      .rectangle(x, rowY(lane.row), w, h, COLORS[kind])
-      .setStrokeStyle(3, COLORS.outline)
+      .image(x, rowY(lane.row), texture)
+      .setScale(PIXEL_SCALE)
+      .setFlipX(lane.dir < 0)
       .setDepth(kind === "log" ? 2 : 6);
+    if (kind === "car") body.setTint(Phaser.Utils.Array.GetRandom(CAR_TINTS) as number);
     lane.movers.push({ body, kind });
   }
 
@@ -148,7 +153,7 @@ export class LaneManager {
       if (lane.type === "field") continue;
       for (const m of lane.movers) m.body.x += lane.dir * lane.speed * dt;
       lane.movers = lane.movers.filter((m) => {
-        const off = m.body.x < -m.body.width || m.body.x > VIEW_W + m.body.width;
+        const off = m.body.x < -m.body.displayWidth || m.body.x > VIEW_W + m.body.displayWidth;
         if (off) m.body.destroy();
         return !off;
       });

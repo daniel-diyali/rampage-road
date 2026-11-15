@@ -6,6 +6,17 @@ export const COLS = 13;
 export const VIEW_W = TILE * COLS;
 export const VIEW_H = 720;
 
+// Sprites are drawn at 32px per tile and scaled up, so pixel art stays crisp.
+export const PIXEL_SCALE = TILE / 32;
+
+export const SPRITES = [
+  "cougar", "rabbit", "car", "truck", "train", "log2", "log3", "log4",
+  "bale", "sage", "fieldA", "fieldB", "road", "water", "rail",
+] as const;
+
+// Tinting the white car sprite gives traffic variety without drawing more cars.
+export const CAR_TINTS = [0xffffff, 0xe06060, 0x6a9be0, 0x7cc47a, 0xf2c14e];
+
 // Palouse wheat fields and WSU crimson give the game its own look
 // instead of Crossy Road's green grass.
 export const COLORS = {
@@ -57,6 +68,10 @@ export const TUNING = {
   vanKnockback: 6,
   vanStunSec: 2.5,
   hitStopMs: 70,
+  vehicleTrim: TILE * 0.25,
+  playerHalfWidth: TILE * 0.2,
+  logGrace: TILE * 0.25,
+  splashGraceMs: 120,
   hopMs: 110,
   pounceMs: 170,
   backtrackLimit: 4,
