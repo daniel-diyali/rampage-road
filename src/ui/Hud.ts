@@ -11,10 +11,11 @@ export class Hud {
   private fill: Phaser.GameObjects.Rectangle;
   private rageText: Phaser.GameObjects.Text;
   private scoreText: Phaser.GameObjects.Text;
+  private bestText: Phaser.GameObjects.Text;
   private message: Phaser.GameObjects.Text;
 
   /// Tier marks are drawn from TUNING so the bar always matches the real smash rules.
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, best: number) {
     const pin = <T extends Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Depth>(o: T, depth: number): T => {
       o.setScrollFactor(0);
       o.setDepth(depth);
@@ -47,6 +48,12 @@ export class Hud {
         .setOrigin(1, 0.5),
       102,
     );
+    this.bestText = pin(
+      scene.add
+        .text(VIEW_W - 16, BAR_Y + 24, `BEST ${best}`, { fontFamily: FONT, fontSize: "14px", color: "#ffe066", stroke: "#000", strokeThickness: 3 })
+        .setOrigin(1, 0.5),
+      102,
+    );
     this.message = pin(
       scene.add
         .text(VIEW_W / 2, VIEW_H / 2, "", {
@@ -69,6 +76,11 @@ export class Hud {
     const label = unleashed ? "UNLEASHED" : ready ? "PRESS SPACE!" : "RAGE";
     this.rageText.setText(`${label} ${Math.ceil(rage)}%`);
     this.scoreText.setText(`${score}`);
+  }
+
+  /// Only called on a new record, so the live BEST counter never lies mid-run.
+  setBest(best: number): void {
+    this.bestText.setText(`BEST ${best}`);
   }
 
   showMessage(text: string): void {
