@@ -10,6 +10,7 @@ import { RageMeter } from "../systems/RageMeter";
 import { Hud } from "../ui/Hud";
 import { Effects } from "../fx/Effects";
 import { HighScore } from "../systems/HighScore";
+import { AudioManager } from "../systems/AudioManager";
 
 const TUTORIAL =
   "ARROWS / WASD to hop\nHunt JACKRABBITS + get CLOSE CALLS for RAGE\nSPACE at 100% to UNLEASH\nAnimal control is right behind you...";
@@ -21,6 +22,9 @@ export class GameScene extends Phaser.Scene {
   private rage!: RageMeter;
   private hud!: Hud;
   private fx!: Effects;
+  private audio!: AudioManager;
+  private wasReady = false;
+  private wasUnleashed = false;
   private rageTint!: Phaser.GameObjects.Rectangle;
   /** Hop squash is tweened separately so it can stack on top of the rage size. */
   private squash = { x: 1, y: 1 };
@@ -63,9 +67,18 @@ export class GameScene extends Phaser.Scene {
     this.queuedHop = null;
     this.splashStart = null;
     this.fx = new Effects(this);
+    this.audio = new AudioManager(this);
+    this.audio.startMusic();
+    this.audio.setRage(false);
+    this.wasReady = false;
+    this.wasUnleashed = false;
 
     this.prey = new PreyManager(this);
-    this.lanes = new LaneManager(this, (lane) => this.prey.maybeSpawn(lane));
+    this.lanes = new LaneManager(
+      this,
+      (lane) => this.prey.maybeSpawn(lane),
+      (lane) => this.onTrainWarning(lane.row),
+    );
     this.prey.attach(this.lanes);
     this.lanes.ensureRange(-6, TUNING.lanesAhead);
     this.rage = new RageMeter();
@@ -74,7 +87,7 @@ export class GameScene extends Phaser.Scene {
 
     this.van = new AnimalControl(this, this.player.x);
 
-    this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R,M") as Record<string, Phaser.Input.Keyboard.Key>;
     this.cameras.main.setBackgroundColor(COLORS.fieldA);
     this.cameras.main.scrollY = this.player.y - VIEW_H * 0.65;
 
@@ -130,6 +143,7 @@ export class GameScene extends Phaser.Scene {
   private handleInput(): void {
     const k = this.keys;
     const pressed = Phaser.Input.Keyboard.JustDown;
+    if (pressed(k.M)) this.audio.toggleMute();
     if (pressed(k.SPACE) && this.rage.unleash()) this.playUnleashFx();
 
     let dir: [number, number] | null = null;
@@ -159,6 +173,7 @@ export class GameScene extends Phaser.Scene {
     this.onLog = false;
     this.splashStart = null;
     this.squash = { x: 0.8, y: 1.25 };
+    this.audio.play(pouncing ? "pounce" : "hop", pouncing ? 0.7 : 0.35);
     this.tweens.add({
       targets: this.player,
       x: colX(nc),
@@ -183,6 +198,7 @@ export class GameScene extends Phaser.Scene {
       this.rage.add(TUNING.ragePerRabbit);
       this.bonus += TUNING.rabbitPoints;
       this.fx.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
+      this.audio.play("snack");
       this.fx.burst(this.player.x, this.player.y, COLORS.rabbit, 8, 30, 5);
     }
 
@@ -194,6 +210,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playUnleashFx(): void {
+    this.audio.play("unleash", 0.9);
     this.cameras.main.shake(300, 0.012);
     this.cameras.main.flash(180, 255, 60, 60);
     this.fx.floatText(this.player.x, this.player.y - TILE, "RAMPAGE!", "#ff3b3b", 28);
@@ -210,6 +227,16 @@ export class GameScene extends Phaser.Scene {
     else this.player.clearTint();
     const pulse = 0.08 + Math.sin(this.time.now / 120) * 0.04;
     this.rageTint.setAlpha(this.rage.unleashed ? pulse : 0);
+
+    if (this.rage.ready && !this.wasReady) this.audio.play("rage_ready", 0.7);
+    if (this.rage.unleashed !== this.wasUnleashed) this.audio.setRage(this.rage.unleashed);
+    this.wasReady = this.rage.ready;
+    this.wasUnleashed = this.rage.unleashed;
+  }
+
+  /// Only trains near the cougar ring the bell, otherwise every offscreen rail would be noisy.
+  private onTrainWarning(row: number): void {
+    if (Math.abs(row - this.row) <= 6) this.audio.play("train_warning", 0.5);
   }
 
   /// Vehicle hitboxes are trimmed at both ends so only a real overlap counts as a hit.
@@ -236,6 +263,7 @@ export class GameScene extends Phaser.Scene {
           this.closeCalls.add(m);
           this.rage.add(TUNING.ragePerCloseCall);
           this.fx.floatText(px, this.player.y - TILE / 2, "CLOSE CALL!", "#ffe066");
+          this.audio.play("close_call", 0.5);
         }
       }
     }
@@ -260,6 +288,7 @@ export class GameScene extends Phaser.Scene {
     this.bonus += points;
     this.cameras.main.shake(140, 0.008);
     this.freezeUntil = time + TUNING.hitStopMs;
+    this.audio.play(kind === "train" ? "smash_train" : "smash", 0.8);
     this.fx.burst(m.body.x, m.body.y, COLORS[kind], 10, 60, 7);
 
     const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
@@ -282,6 +311,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.van.reached(this.row)) return;
     if (this.rage.unleashed && this.rage.percent >= TUNING.vanWreckAt) {
       this.van.wreck();
+      this.audio.play("smash_train", 0.9);
       this.bonus += TUNING.vanWreckPoints;
       this.cameras.main.shake(300, 0.015);
       this.fx.floatText(this.van.x, this.van.y - TILE, `VAN WRECKED +${TUNING.vanWreckPoints}`, "#ffe066", 22);
@@ -305,6 +335,8 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.player);
     this.player.setTint(COLORS.dead);
     this.rageTint.setAlpha(0);
+    this.audio.play("death", 0.8);
+    this.audio.setRage(false);
     this.cameras.main.shake(350, 0.015);
     this.fx.burst(this.player.x, this.player.y, COLORS.cougar, 12, 50, 6);
 

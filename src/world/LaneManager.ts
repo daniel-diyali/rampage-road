@@ -4,16 +4,20 @@ import Phaser from "phaser";
 import { CAR_TINTS, COLS, COLORS, PIXEL_SCALE, TILE, VIEW_W, colX, rowY } from "../config";
 import type { Lane, LaneType, Mover, MoverKind } from "../types";
 
+const TRAIN_WARNING_SEC = 1.2;
+
 export class LaneManager {
   private lanes = new Map<number, Lane>();
   private scene: Phaser.Scene;
   private onField: (lane: Lane) => void;
+  private onTrainWarning: (lane: Lane) => void;
 
-  /// onField lets other systems (like prey) populate new fields without
+  /// The callbacks let other systems (prey, audio) react to lanes without
   /// LaneManager needing to know about them.
-  constructor(scene: Phaser.Scene, onField: (lane: Lane) => void) {
+  constructor(scene: Phaser.Scene, onField: (lane: Lane) => void, onTrainWarning: (lane: Lane) => void) {
     this.scene = scene;
     this.onField = onField;
+    this.onTrainWarning = onTrainWarning;
   }
 
   get(row: number): Lane | undefined {
@@ -157,8 +161,10 @@ export class LaneManager {
         if (off) m.body.destroy();
         return !off;
       });
+      const before = lane.spawnTimer;
       lane.spawnTimer -= dt;
-      if (lane.warning) lane.warning.setVisible(lane.spawnTimer < 1.2 && Math.floor(lane.spawnTimer * 8) % 2 === 0);
+      if (lane.warning && before >= TRAIN_WARNING_SEC && lane.spawnTimer < TRAIN_WARNING_SEC) this.onTrainWarning(lane);
+      if (lane.warning) lane.warning.setVisible(lane.spawnTimer < TRAIN_WARNING_SEC && Math.floor(lane.spawnTimer * 8) % 2 === 0);
       if (lane.spawnTimer <= 0) {
         const { kind, w } = this.pickMover(lane);
         this.spawn(lane, kind, w);

@@ -3,15 +3,17 @@
 import Phaser from "phaser";
 import { COLORS, PIXEL_SCALE, SPRITES, TILE, VIEW_H, VIEW_W } from "../config";
 import { HighScore } from "../systems/HighScore";
+import { AudioManager } from "../systems/AudioManager";
 
 export class TitleScene extends Phaser.Scene {
   constructor() {
     super("Title");
   }
 
-  /// Title is the first scene, so it loads every sprite once for the whole game.
+  /// Title is the first scene, so it loads every sprite and sound once for the whole game.
   preload(): void {
     for (const key of SPRITES) this.load.image(key, `assets/sprites/${key}.png`);
+    AudioManager.preload(this.load);
   }
 
   /// NEAREST filtering keeps the scaled-up pixel art sharp instead of blurry.
@@ -38,7 +40,7 @@ export class TitleScene extends Phaser.Scene {
     this.label(
       cx,
       VIEW_H * 0.62,
-      "ARROWS / WASD  hop\nHUNT jackrabbits + CLOSE CALLS  build rage\nSPACE at 100%  UNLEASH\nDon't let animal control catch you",
+      "ARROWS / WASD  hop\nHUNT jackrabbits + CLOSE CALLS  build rage\nSPACE at 100%  UNLEASH\nDon't let animal control catch you\nM  mute",
       16,
     );
 
