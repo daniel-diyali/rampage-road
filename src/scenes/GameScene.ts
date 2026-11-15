@@ -1,0 +1,231 @@
+// The scene only coordinates: lanes, rage, and the HUD each live in their own class.
+// What stays here is the cougar itself, input, collisions, and the camera.
+import Phaser from "phaser";
+import { COLS, COLORS, TILE, TUNING, VIEW_H, colX, rowY } from "../config";
+import type { Lane, Mover, VehicleKind } from "../types";
+import { LaneManager } from "../world/LaneManager";
+import { RageMeter } from "../systems/RageMeter";
+import { Hud } from "../ui/Hud";
+
+const TUTORIAL = "ARROWS / WASD to hop\nSnacks + CLOSE CALLS fill RAGE\nSPACE at 100% to UNLEASH";
+const HIT_RANGE = TILE * 0.3;
+
+export class GameScene extends Phaser.Scene {
+  private lanes!: LaneManager;
+  private rage!: RageMeter;
+  private hud!: Hud;
+  private player!: Phaser.GameObjects.Rectangle;
+  private keys!: Record<string, Phaser.Input.Keyboard.Key>;
+  private closeCalls!: WeakSet<Mover>;
+  private col = 0;
+  private row = 0;
+  private maxRow = 0;
+  private bonus = 0;
+  private combo = 0;
+  private lastSmashAt = 0;
+  private hopping = false;
+  private onLog = false;
+  private dead = false;
+
+  constructor() {
+    super("Game");
+  }
+
+  /// Phaser reuses this object on restart, so every field is reset here, not in the constructor.
+  create(): void {
+    this.col = Math.floor(COLS / 2);
+    this.row = 0;
+    this.maxRow = 0;
+    this.bonus = 0;
+    this.combo = 0;
+    this.lastSmashAt = 0;
+    this.hopping = false;
+    this.onLog = false;
+    this.dead = false;
+    this.closeCalls = new WeakSet();
+
+    this.lanes = new LaneManager(this);
+    this.lanes.ensureRange(-6, TUNING.lanesAhead);
+    this.rage = new RageMeter();
+
+    this.player = this.add
+      .rectangle(colX(this.col), rowY(this.row), TILE * 0.7, TILE * 0.7, COLORS.cougar)
+      .setStrokeStyle(3, COLORS.cougarOutline)
+      .setDepth(10);
+
+    this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.cameras.main.setBackgroundColor(COLORS.fieldA);
+    this.cameras.main.scrollY = this.player.y - VIEW_H * 0.65;
+
+    this.hud = new Hud(this);
+    this.hud.showMessage(TUTORIAL);
+  }
+
+  /// Order matters: things move first, then we check what the cougar ran into.
+  update(time: number, delta: number): void {
+    if (this.dead) {
+      if (Phaser.Input.Keyboard.JustDown(this.keys.R)) this.scene.restart();
+      return;
+    }
+    const dt = delta / 1000;
+    this.lanes.update(dt);
+    this.rideLog(dt);
+    this.handleInput();
+    this.updateRage(dt);
+    this.checkCollisions(time);
+    this.updateCamera(dt);
+    this.lanes.ensureRange(this.maxRow, this.maxRow + TUNING.lanesAhead);
+    this.lanes.cleanupBelow(this.maxRow - TUNING.lanesBehind);
+    this.hud.update(this.rage.percent, this.rage.unleashed, this.rage.ready, this.score);
+  }
+
+  private get score(): number {
+    return this.maxRow + this.bonus;
+  }
+
+  /// Logs carry the cougar sideways; getting pushed off-screen ends the run.
+  private rideLog(dt: number): void {
+    if (!this.onLog || this.hopping) return;
+    const lane = this.lanes.get(this.row)!;
+    this.player.x += lane.dir * lane.speed * dt;
+    if (this.player.x < 0 || this.player.x > this.scale.width) this.die("SWEPT AWAY");
+  }
+
+  /// SPACE is checked even mid-hop so unleashing never feels laggy.
+  private handleInput(): void {
+    const k = this.keys;
+    const pressed = Phaser.Input.Keyboard.JustDown;
+    if (pressed(k.SPACE) && this.rage.unleash()) this.playUnleashFx();
+    if (this.hopping) return;
+    if (pressed(k.UP) || pressed(k.W)) this.tryHop(0, 1);
+    else if (pressed(k.DOWN) || pressed(k.S)) this.tryHop(0, -1);
+    else if (pressed(k.LEFT) || pressed(k.A)) this.tryHop(-1, 0);
+    else if (pressed(k.RIGHT) || pressed(k.D)) this.tryHop(1, 0);
+  }
+
+  /// While unleashed, forward hops become pounces that cover two rows,
+  /// so the rampage plays differently instead of just being invincible.
+  private tryHop(dc: number, dr: number): void {
+    const pouncing = this.rage.unleashed && dr > 0;
+    const fromCol = Phaser.Math.Clamp(Math.round((this.player.x - TILE / 2) / TILE), 0, COLS - 1);
+    const nc = fromCol + dc;
+    const nr = this.row + (pouncing ? TUNING.pounceRows : dr);
+    if (nc < 0 || nc >= COLS || nr < this.maxRow - TUNING.backtrackLimit) return;
+    const target = this.lanes.ensure(nr);
+    if (target.type === "field" && target.blockers.has(nc)) return;
+
+    this.hud.hideMessage();
+    this.hopping = true;
+    this.onLog = false;
+    this.tweens.add({
+      targets: this.player,
+      x: colX(nc),
+      y: rowY(nr),
+      duration: pouncing ? TUNING.pounceMs : TUNING.hopMs,
+      ease: pouncing ? "Back.easeOut" : "Quad.easeOut",
+      onComplete: () => this.land(nc, nr),
+    });
+  }
+
+  private land(col: number, row: number): void {
+    this.hopping = false;
+    this.col = col;
+    this.row = row;
+    this.maxRow = Math.max(this.maxRow, row);
+    if (this.lanes.takeSnack(row, col)) this.rage.add(TUNING.ragePerSnack);
+  }
+
+  private playUnleashFx(): void {
+    this.cameras.main.shake(300, 0.012);
+    this.cameras.main.flash(180, 255, 60, 60);
+    this.floatText(this.player.x, this.player.y - TILE, "RAMPAGE!", "#ff3b3b", 28);
+  }
+
+  /// The cougar's size and color are the player's main clue to how much power is left.
+  private updateRage(dt: number): void {
+    this.rage.update(dt);
+    this.player.setScale(this.rage.scale);
+    this.player.setFillStyle(this.rage.unleashed ? COLORS.rageGlow : COLORS.cougar);
+  }
+
+  /// A vehicle that just barely passed the cougar counts as a close call and gives rage,
+  /// which rewards risky crossings. Each vehicle can only give one close call.
+  private checkCollisions(time: number): void {
+    const lane = this.lanes.get(this.row);
+    if (!lane) return;
+    const px = this.player.x;
+
+    if (lane.type === "road" || lane.type === "rail") {
+      for (const m of [...lane.movers]) {
+        const gap = Math.abs(m.body.x - px) - m.body.width / 2;
+        const kind = m.kind as VehicleKind;
+        if (gap < HIT_RANGE) {
+          if (this.rage.canSmash(kind)) this.smash(lane, m, kind, time);
+          else return this.die(kind === "train" ? "FLATTENED BY A TRAIN" : "ROADKILL");
+          continue;
+        }
+        const alreadyPassed = (m.body.x - px) * lane.dir > 0;
+        if (alreadyPassed && gap < HIT_RANGE + TUNING.closeCallRange && !this.closeCalls.has(m)) {
+          this.closeCalls.add(m);
+          this.rage.add(TUNING.ragePerCloseCall);
+          this.floatText(px, this.player.y - TILE / 2, "CLOSE CALL!", "#ffe066");
+        }
+      }
+    }
+
+    if (lane.type === "river" && !this.hopping) {
+      this.onLog = lane.movers.some((m) => Math.abs(m.body.x - px) < m.body.width / 2);
+      if (!this.onLog) this.die("SPLASH");
+    }
+  }
+
+  /// Smashes close together build a combo multiplier to reward going wild during a rampage.
+  private smash(lane: Lane, m: Mover, kind: VehicleKind, time: number): void {
+    this.lanes.removeMover(lane, m);
+    this.combo = time - this.lastSmashAt < TUNING.comboWindowMs ? this.combo + 1 : 1;
+    this.lastSmashAt = time;
+    const points = TUNING.smashPoints[kind] * this.combo;
+    this.bonus += points;
+    this.cameras.main.shake(140, 0.008);
+
+    const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
+    this.floatText(m.body.x, m.body.y - TILE / 2, label, "#ffffff");
+    this.tweens.add({
+      targets: m.body,
+      angle: Phaser.Math.Between(-200, 200),
+      x: m.body.x + Phaser.Math.Between(-150, 150),
+      y: m.body.y - 120,
+      alpha: 0,
+      duration: 450,
+      onComplete: () => m.body.destroy(),
+    });
+  }
+
+  /// Short pop-up text for feedback that should be noticed but not block play.
+  private floatText(x: number, y: number, text: string, color: string, size = 18): void {
+    const t = this.add
+      .text(x, y, text, { fontFamily: "monospace", fontSize: `${size}px`, color, stroke: "#000", strokeThickness: 4 })
+      .setOrigin(0.5)
+      .setDepth(20);
+    this.tweens.add({ targets: t, y: y - 40, alpha: 0, duration: 700, onComplete: () => t.destroy() });
+  }
+
+  /// The camera never scrolls back down, and its slow creep stops players from camping in a safe spot.
+  private updateCamera(dt: number): void {
+    const cam = this.cameras.main;
+    const target = this.player.y - VIEW_H * 0.65;
+    if (target < cam.scrollY) cam.scrollY = Phaser.Math.Linear(cam.scrollY, target, 0.12);
+    if (this.maxRow > 0) cam.scrollY -= TUNING.cameraCreep * dt;
+    if (this.player.y > cam.scrollY + VIEW_H + TILE * 0.5) this.die("TOO SLOW");
+  }
+
+  /// The guard stops a second collision in the same frame from running this twice.
+  private die(reason: string): void {
+    if (this.dead) return;
+    this.dead = true;
+    this.tweens.killTweensOf(this.player);
+    this.player.setFillStyle(COLORS.dead);
+    this.cameras.main.shake(350, 0.015);
+    this.hud.showMessage(`${reason}\n\nSCORE ${this.score}\n\nPress R to run again`);
+  }
+}
