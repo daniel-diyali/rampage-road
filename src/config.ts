@@ -59,7 +59,7 @@ export const TUNING = {
   rageDrainPerSec: 6,
   maxRageScale: 0.7,
   comboWindowMs: 1500,
-  pounceRows: 2,
+  pounceRows: 1,
   vanStartSpeed: 0.55,
   vanAccel: 0.006,
   vanMaxGap: 4.5,
