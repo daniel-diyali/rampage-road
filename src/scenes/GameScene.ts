@@ -11,6 +11,8 @@ import { Hud } from "../ui/Hud";
 import { Effects } from "../fx/Effects";
 import { HighScore } from "../systems/HighScore";
 import { AudioManager } from "../systems/AudioManager";
+import { PlayerName } from "../systems/PlayerName";
+import { LeaderboardService } from "../services/LeaderboardService";
 
 const TUTORIAL =
   "ARROWS / WASD to hop\nHunt JACKRABBITS + get CLOSE CALLS for RAGE\nSPACE at 100% to UNLEASH\nAnimal control is right behind you...";
@@ -31,8 +33,6 @@ export class GameScene extends Phaser.Scene {
   private freezeUntil = 0;
   /** A hop pressed mid-air is remembered and played on landing, so fast inputs never get eaten. */
   private queuedHop: [number, number] | null = null;
-  /** When the cougar first touched water with no log under it; null while safe. */
-  private splashStart: number | null = null;
   private player!: Phaser.GameObjects.Image;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private closeCalls!: WeakSet<Mover>;
@@ -65,7 +65,6 @@ export class GameScene extends Phaser.Scene {
     this.squash = { x: 1, y: 1 };
     this.freezeUntil = 0;
     this.queuedHop = null;
-    this.splashStart = null;
     this.fx = new Effects(this);
     this.audio = new AudioManager(this);
     this.audio.startMusic();
@@ -87,7 +86,7 @@ export class GameScene extends Phaser.Scene {
 
     this.van = new AnimalControl(this, this.player.x);
 
-    this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R,M") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R,M,L,T") as Record<string, Phaser.Input.Keyboard.Key>;
     this.cameras.main.setBackgroundColor(COLORS.fieldA);
     this.cameras.main.scrollY = this.player.y - VIEW_H * 0.65;
 
@@ -97,7 +96,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(90)
       .setAlpha(0);
 
-    this.hud = new Hud(this, HighScore.get());
+    this.hud = new Hud(this, HighScore.get(PlayerName.get()));
     this.hud.showMessage(TUTORIAL);
   }
 
@@ -106,6 +105,8 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     if (this.dead) {
       if (Phaser.Input.Keyboard.JustDown(this.keys.R)) this.scene.restart();
+      else if (Phaser.Input.Keyboard.JustDown(this.keys.L) && LeaderboardService.enabled) this.scene.start("Leaderboard");
+      else if (Phaser.Input.Keyboard.JustDown(this.keys.T)) this.scene.start("Title");
       return;
     }
     if (time < this.freezeUntil) return;
@@ -171,7 +172,6 @@ export class GameScene extends Phaser.Scene {
     this.hud.hideMessage();
     this.hopping = true;
     this.onLog = false;
-    this.splashStart = null;
     this.squash = { x: 0.8, y: 1.25 };
     this.audio.play(pouncing ? "pounce" : "hop", pouncing ? 0.7 : 0.35);
     this.tweens.add({
@@ -243,7 +243,7 @@ export class GameScene extends Phaser.Scene {
   /// A vehicle that just barely passed the cougar counts as a close call and gives rage,
   /// which rewards risky crossings. Each vehicle can only give one close call.
   /// Nothing is checked mid-hop: once you commit to a hop, the lane you left can't kill you.
-  /// Water gets a short grace period (coyote time) so a log that's *just* arriving still saves you.
+  /// Water kills instantly with no grace period, so fast tapping can't skip across a river.
   private checkCollisions(time: number): void {
     const lane = this.lanes.get(this.row);
     if (!lane || this.hopping) return;
@@ -270,12 +270,7 @@ export class GameScene extends Phaser.Scene {
 
     if (lane.type === "river") {
       this.onLog = lane.movers.some((m) => Math.abs(m.body.x - px) < m.body.displayWidth / 2 + TUNING.logGrace);
-      if (this.onLog) {
-        this.splashStart = null;
-      } else {
-        this.splashStart ??= time;
-        if (time - this.splashStart >= TUNING.splashGraceMs) this.die("SPLASH");
-      }
+      if (!this.onLog) this.die("SPLASH");
     }
   }
 
@@ -341,9 +336,15 @@ export class GameScene extends Phaser.Scene {
     this.fx.burst(this.player.x, this.player.y, COLORS.cougar, 12, 50, 6);
 
     this.hud.update(this.rage.percent, false, false, this.score);
-    const newBest = HighScore.submit(this.score);
+    const name = PlayerName.get();
+    const newBest = HighScore.submit(name, this.score);
     if (newBest) this.hud.setBest(this.score);
-    const bestLine = newBest ? "NEW BEST!" : `BEST ${HighScore.get()}`;
-    this.hud.showMessage(`${reason}\n\nSCORE ${this.score}\n${bestLine}\n\nPress R to run again`);
+    void LeaderboardService.submit(name, this.score);
+
+    const bestLine = newBest ? "NEW BEST!" : `BEST ${HighScore.get(name)}`;
+    const boardLine = LeaderboardService.enabled ? "\nL for leaderboard" : "";
+    this.hud.showMessage(
+      `${reason}\n\n${name}  SCORE ${this.score}\n${bestLine}\n\nR to run again${boardLine}\nT for title / change name`,
+    );
   }
 }

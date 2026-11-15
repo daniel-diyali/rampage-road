@@ -71,7 +71,6 @@ export const TUNING = {
   vehicleTrim: TILE * 0.25,
   playerHalfWidth: TILE * 0.2,
   logGrace: TILE * 0.25,
-  splashGraceMs: 120,
   hopMs: 110,
   pounceMs: 170,
   backtrackLimit: 4,

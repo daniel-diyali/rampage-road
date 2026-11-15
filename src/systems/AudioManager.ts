@@ -35,7 +35,9 @@ export class AudioManager {
 
   /// Called from the first scene's preload so every scene can use the sounds.
   static preload(load: Phaser.Loader.LoaderPlugin): void {
-    for (const [path, url] of Object.entries(files)) load.audio(keyOf(path), url);
+    for (const [path, url] of Object.entries(files)) {
+      if (!load.cacheManager.audio.exists(keyOf(path))) load.audio(keyOf(path), url);
+    }
   }
 
   /// Small random pitch changes stop repeated sounds (like hops) from feeling robotic.
