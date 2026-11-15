@@ -44,6 +44,25 @@ export class RageMeter {
     return this.active && this.value >= TUNING.smashAt[kind];
   }
 
+  /// How many vehicle types can be smashed right now: 3 = trains too, 0 = nothing.
+  /// The scene watches this number change to tell the player when a power is lost or regained.
+  get tier(): number {
+    if (!this.active) return 0;
+    const { car, truck, train } = TUNING.smashAt;
+    if (this.value >= train) return 3;
+    if (this.value >= truck) return 2;
+    if (this.value >= car) return 1;
+    return 0;
+  }
+
+  /// True in the last moment before the current power drops, so the HUD can warn early.
+  get aboutToDrop(): boolean {
+    const t = this.tier;
+    if (t === 0) return false;
+    const floor = [0, TUNING.smashAt.car, TUNING.smashAt.truck, TUNING.smashAt.train][t];
+    return this.value - floor < TUNING.tierWarnPercent;
+  }
+
   /// The cougar shrinks with the bar so players can feel their power running out.
   get scale(): number {
     return this.active ? 1 + (this.value / 100) * TUNING.maxRageScale : 1;

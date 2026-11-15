@@ -27,6 +27,7 @@ export class GameScene extends Phaser.Scene {
   private audio!: AudioManager;
   private wasReady = false;
   private wasUnleashed = false;
+  private lastTier = 0;
   private rageTint!: Phaser.GameObjects.Rectangle;
   /** Hop squash is tweened separately so it can stack on top of the rage size. */
   private squash = { x: 1, y: 1 };
@@ -71,6 +72,7 @@ export class GameScene extends Phaser.Scene {
     this.audio.setRage(false);
     this.wasReady = false;
     this.wasUnleashed = false;
+    this.lastTier = 0;
 
     this.prey = new PreyManager(this);
     this.lanes = new LaneManager(
@@ -124,7 +126,7 @@ export class GameScene extends Phaser.Scene {
     this.lanes.ensureRange(this.maxRow, this.maxRow + TUNING.lanesAhead);
     this.lanes.cleanupBelow(this.maxRow - TUNING.lanesBehind);
     this.prey.cleanupBelow(this.maxRow - TUNING.lanesBehind);
-    this.hud.update(this.rage.percent, this.rage.unleashed, this.rage.ready, this.score);
+    this.hud.update(this.rage.percent, this.rage.unleashed, this.rage.ready, this.score, this.rage.aboutToDrop);
   }
 
   private get score(): number {
@@ -228,10 +230,31 @@ export class GameScene extends Phaser.Scene {
     const pulse = 0.08 + Math.sin(this.time.now / 120) * 0.04;
     this.rageTint.setAlpha(this.rage.unleashed ? pulse : 0);
 
+    this.announceTierChange();
     if (this.rage.ready && !this.wasReady) this.audio.play("rage_ready", 0.7);
     if (this.rage.unleashed !== this.wasUnleashed) this.audio.setRage(this.rage.unleashed);
     this.wasReady = this.rage.ready;
     this.wasUnleashed = this.rage.unleashed;
+  }
+
+  /// Players were dying because they couldn't tell when a power ran out mid-rampage,
+  /// so every drop (and every regain from eating rabbits) gets a banner.
+  /// Starting the rampage is skipped because it already has its own "RAMPAGE!" effect.
+  private announceTierChange(): void {
+    const tier = this.rage.tier;
+    const prev = this.lastTier;
+    this.lastTier = tier;
+    if (tier === prev || (prev === 0 && !this.wasUnleashed)) return;
+
+    if (tier < prev) {
+      const lost = ["RAGE OVER - DODGE EVERYTHING", "TRUCKS CAN HIT YOU", "TRAINS CAN HIT YOU"][tier];
+      this.hud.showBanner(lost, "#ff5a5a");
+      this.audio.play("close_call", 0.6);
+    } else {
+      const gained = ["", "CAR-PROOF AGAIN!", "TRUCK-PROOF AGAIN!", "TRAIN-PROOF AGAIN!"][tier];
+      this.hud.showBanner(gained, "#7dff7a");
+      this.audio.play("rage_ready", 0.6);
+    }
   }
 
   /// Only trains near the cougar ring the bell, otherwise every offscreen rail would be noisy.

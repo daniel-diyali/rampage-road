@@ -60,6 +60,7 @@ export const TUNING = {
   maxRageScale: 0.7,
   comboWindowMs: 1500,
   pounceRows: 1,
+  tierWarnPercent: 6,
   vanStartSpeed: 0.55,
   vanAccel: 0.006,
   vanMaxGap: 4.5,
