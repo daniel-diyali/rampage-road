@@ -1,16 +1,19 @@
 // Lanes are generated just ahead of the player and destroyed behind them,
 // so the road is endless without memory growing forever.
 import Phaser from "phaser";
-import { COLS, COLORS, TILE, TUNING, VIEW_W, colX, rowY } from "../config";
+import { COLS, COLORS, TILE, VIEW_W, colX, rowY } from "../config";
 import type { Lane, LaneType, Mover, MoverKind } from "../types";
 
 export class LaneManager {
   private lanes = new Map<number, Lane>();
-  private snacks = new Map<string, Phaser.GameObjects.Rectangle>();
   private scene: Phaser.Scene;
+  private onField: (lane: Lane) => void;
 
-  constructor(scene: Phaser.Scene) {
+  /// onField lets other systems (like prey) populate new fields without
+  /// LaneManager needing to know about them.
+  constructor(scene: Phaser.Scene, onField: (lane: Lane) => void) {
     this.scene = scene;
+    this.onField = onField;
   }
 
   get(row: number): Lane | undefined {
@@ -70,7 +73,6 @@ export class LaneManager {
   }
 
   /// Rows behind the start are solid hay so the player can't wander off the bottom.
-  /// Snacks only spawn on fields because that's the safe place to grab them.
   private fillField(lane: Lane): void {
     const r = lane.row;
     const baleCount = r < 0 ? COLS : r <= 2 ? 0 : Phaser.Math.Between(0, 3);
@@ -80,12 +82,7 @@ export class LaneManager {
       lane.decor.push(this.scene.add.rectangle(colX(c), rowY(r), TILE * 0.75, TILE * 0.6, COLORS.hay).setDepth(5));
     }
 
-    if (r <= 2 || Math.random() >= TUNING.snackChance) return;
-    const free = [...Array(COLS).keys()].filter((c) => !lane.blockers.has(c));
-    const c = Phaser.Utils.Array.GetRandom(free) as number;
-    const snack = this.scene.add.rectangle(colX(c), rowY(r), TILE * 0.3, TILE * 0.3, COLORS.snack).setDepth(4);
-    this.scene.tweens.add({ targets: snack, angle: 360, duration: 2000, repeat: -1 });
-    this.snacks.set(this.key(r, c), snack);
+    this.onField(lane);
   }
 
   /// Lanes start already full of traffic so the screen never looks empty on load.
@@ -170,32 +167,13 @@ export class LaneManager {
     lane.movers = lane.movers.filter((m) => m !== mover);
   }
 
-  /// Returns true when a snack was eaten so the scene can add rage.
-  takeSnack(row: number, col: number): boolean {
-    const key = this.key(row, col);
-    const snack = this.snacks.get(key);
-    if (!snack) return false;
-    this.snacks.delete(key);
-    this.scene.tweens.killTweensOf(snack);
-    this.scene.tweens.add({ targets: snack, scale: 2.5, alpha: 0, duration: 150, onComplete: () => snack.destroy() });
-    return true;
-  }
-
   cleanupBelow(row: number): void {
     for (const [r, lane] of this.lanes) {
       if (r >= row) continue;
       lane.bg.destroy();
       lane.movers.forEach((m) => m.body.destroy());
       lane.decor.forEach((d) => d.destroy());
-      for (let c = 0; c < COLS; c++) {
-        this.snacks.get(this.key(r, c))?.destroy();
-        this.snacks.delete(this.key(r, c));
-      }
       this.lanes.delete(r);
     }
-  }
-
-  private key(row: number, col: number): string {
-    return `${row}:${col}`;
   }
 }
