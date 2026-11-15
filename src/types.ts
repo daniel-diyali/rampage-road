@@ -23,6 +23,11 @@ export interface Lane {
   dir: number;
   speed: number;
   spawnTimer: number;
+  /** Only trains use a fixed timer; roads and rivers space movers by distance instead. */
   spawnEvery: number;
+  /** Empty space between movers, in tiles, so gaps are always readable. */
+  gapTiles: [number, number];
+  /** Every log in a lane is the same length so players can learn the rhythm. */
+  logTiles: number;
   warning?: Phaser.GameObjects.Rectangle;
 }

@@ -8,7 +8,8 @@ import { RageMeter } from "../systems/RageMeter";
 import { Hud } from "../ui/Hud";
 
 const TUTORIAL = "ARROWS / WASD to hop\nSnacks + CLOSE CALLS fill RAGE\nSPACE at 100% to UNLEASH";
-const HIT_RANGE = TILE * 0.3;
+// Slightly smaller than the cougar so near-touches feel fair instead of cheap.
+const HIT_RANGE = TILE * 0.2;
 
 export class GameScene extends Phaser.Scene {
   private lanes!: LaneManager;
@@ -150,9 +151,10 @@ export class GameScene extends Phaser.Scene {
 
   /// A vehicle that just barely passed the cougar counts as a close call and gives rage,
   /// which rewards risky crossings. Each vehicle can only give one close call.
+  /// Nothing is checked mid-hop: once you commit to a hop, the lane you left can't kill you.
   private checkCollisions(time: number): void {
     const lane = this.lanes.get(this.row);
-    if (!lane) return;
+    if (!lane || this.hopping) return;
     const px = this.player.x;
 
     if (lane.type === "road" || lane.type === "rail") {
@@ -173,7 +175,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    if (lane.type === "river" && !this.hopping) {
+    if (lane.type === "river") {
       this.onLog = lane.movers.some((m) => Math.abs(m.body.x - px) < m.body.width / 2);
       if (!this.onLog) this.die("SPLASH");
     }

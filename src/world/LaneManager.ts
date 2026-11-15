@@ -38,12 +38,17 @@ export class LaneManager {
       speed: 0,
       spawnTimer: 0,
       spawnEvery: 0,
+      gapTiles: [0, 0],
+      logTiles: 0,
     };
     this.lanes.set(r, lane);
 
     if (type === "field") this.fillField(lane);
-    if (type === "road") this.setupTraffic(lane, 70, 160, 1.4, 2.6);
-    if (type === "river") this.setupTraffic(lane, 50, 95, 1.3, 2.1);
+    if (type === "road") this.setupTraffic(lane, 70, 160, [2, 4.5]);
+    if (type === "river") {
+      lane.logTiles = Phaser.Math.Between(2, 4);
+      this.setupTraffic(lane, 50, 95, [1, 2]);
+    }
     if (type === "rail") this.setupRail(lane);
     return lane;
   }
@@ -84,12 +89,24 @@ export class LaneManager {
   }
 
   /// Lanes start already full of traffic so the screen never looks empty on load.
-  private setupTraffic(lane: Lane, minSpeed: number, maxSpeed: number, minGap: number, maxGap: number): void {
+  /// Movers are placed outward from the side they enter on, and spacing is measured
+  /// edge to edge, so the first new arrival can never overlap one already there.
+  private setupTraffic(lane: Lane, minSpeed: number, maxSpeed: number, gapTiles: [number, number]): void {
     lane.speed = Phaser.Math.Between(minSpeed, maxSpeed);
-    lane.spawnEvery = Phaser.Math.FloatBetween(minGap, maxGap);
-    const gap = lane.speed * lane.spawnEvery;
-    for (let x = Phaser.Math.Between(0, gap); x < VIEW_W + TILE * 2; x += gap) this.spawn(lane, x);
-    lane.spawnTimer = lane.spawnEvery;
+    lane.gapTiles = gapTiles;
+    const firstOffset = Phaser.Math.Between(0, TILE * 3);
+    let offset = firstOffset;
+    while (offset < VIEW_W + TILE * 2) {
+      const { kind, w } = this.pickMover(lane);
+      const x = lane.dir > 0 ? offset + w / 2 : VIEW_W - offset - w / 2;
+      this.spawn(lane, kind, w, x);
+      offset += w + this.randomGap(lane);
+    }
+    lane.spawnTimer = Math.max(0, this.randomGap(lane) - firstOffset) / lane.speed;
+  }
+
+  private randomGap(lane: Lane): number {
+    return Phaser.Math.FloatBetween(lane.gapTiles[0], lane.gapTiles[1]) * TILE;
   }
 
   /// Trains are too fast to react to, so a blinking light warns the player first.
@@ -108,23 +125,24 @@ export class LaneManager {
     }
   }
 
-  /// New movers enter from offscreen; atX is only used when pre-filling a lane.
-  private spawn(lane: Lane, atX?: number): void {
-    let kind: MoverKind;
-    let w: number;
+  /// Decides what kind of mover a lane gets and how wide it is.
+  private pickMover(lane: Lane): { kind: MoverKind; w: number } {
     if (lane.type === "road") {
-      kind = Math.random() < 0.3 ? "truck" : "car";
-      w = kind === "truck" ? TILE * 2 : TILE * 0.95;
-    } else if (lane.type === "river") {
-      kind = "log";
-      w = TILE * Phaser.Math.Between(2, 4);
-    } else {
-      kind = "train";
-      w = TILE * 12;
+      const kind: MoverKind = Math.random() < 0.3 ? "truck" : "car";
+      return { kind, w: kind === "truck" ? TILE * 2 : TILE * 0.95 };
     }
+    if (lane.type === "river") return { kind: "log", w: TILE * lane.logTiles };
+    return { kind: "train", w: TILE * 12 };
+  }
+
+  /// With no x given, the mover starts just offscreen on the side it drives in from.
+  private spawn(lane: Lane, kind: MoverKind, w: number, atX?: number): void {
     const x = atX ?? (lane.dir > 0 ? -w / 2 : VIEW_W + w / 2);
     const h = kind === "log" ? TILE * 0.7 : TILE * 0.8;
-    const body = this.scene.add.rectangle(x, rowY(lane.row), w, h, COLORS[kind]).setDepth(kind === "log" ? 2 : 6);
+    const body = this.scene.add
+      .rectangle(x, rowY(lane.row), w, h, COLORS[kind])
+      .setStrokeStyle(3, COLORS.outline)
+      .setDepth(kind === "log" ? 2 : 6);
     lane.movers.push({ body, kind });
   }
 
@@ -140,8 +158,9 @@ export class LaneManager {
       lane.spawnTimer -= dt;
       if (lane.warning) lane.warning.setVisible(lane.spawnTimer < 1.2 && Math.floor(lane.spawnTimer * 8) % 2 === 0);
       if (lane.spawnTimer <= 0) {
-        this.spawn(lane);
-        lane.spawnTimer = lane.spawnEvery;
+        const { kind, w } = this.pickMover(lane);
+        this.spawn(lane, kind, w);
+        lane.spawnTimer = lane.type === "rail" ? lane.spawnEvery : (w + this.randomGap(lane)) / lane.speed;
       }
     }
   }
