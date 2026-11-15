@@ -4,15 +4,20 @@ import Phaser from "phaser";
 import { COLS, COLORS, TILE, TUNING, VIEW_H, colX, rowY } from "../config";
 import type { Lane, Mover, VehicleKind } from "../types";
 import { LaneManager } from "../world/LaneManager";
+import { PreyManager } from "../world/PreyManager";
+import { AnimalControl } from "../world/AnimalControl";
 import { RageMeter } from "../systems/RageMeter";
 import { Hud } from "../ui/Hud";
 
-const TUTORIAL = "ARROWS / WASD to hop\nSnacks + CLOSE CALLS fill RAGE\nSPACE at 100% to UNLEASH";
+const TUTORIAL =
+  "ARROWS / WASD to hop\nHunt JACKRABBITS + get CLOSE CALLS for RAGE\nSPACE at 100% to UNLEASH\nAnimal control is right behind you...";
 // Slightly smaller than the cougar so near-touches feel fair instead of cheap.
 const HIT_RANGE = TILE * 0.2;
 
 export class GameScene extends Phaser.Scene {
   private lanes!: LaneManager;
+  private prey!: PreyManager;
+  private van!: AnimalControl;
   private rage!: RageMeter;
   private hud!: Hud;
   private player!: Phaser.GameObjects.Rectangle;
@@ -45,7 +50,9 @@ export class GameScene extends Phaser.Scene {
     this.dead = false;
     this.closeCalls = new WeakSet();
 
-    this.lanes = new LaneManager(this);
+    this.prey = new PreyManager(this);
+    this.lanes = new LaneManager(this, (lane) => this.prey.maybeSpawn(lane));
+    this.prey.attach(this.lanes);
     this.lanes.ensureRange(-6, TUNING.lanesAhead);
     this.rage = new RageMeter();
 
@@ -53,6 +60,8 @@ export class GameScene extends Phaser.Scene {
       .rectangle(colX(this.col), rowY(this.row), TILE * 0.7, TILE * 0.7, COLORS.cougar)
       .setStrokeStyle(3, COLORS.cougarOutline)
       .setDepth(10);
+
+    this.van = new AnimalControl(this, this.player.x);
 
     this.keys = this.input.keyboard!.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D,SPACE,R") as Record<string, Phaser.Input.Keyboard.Key>;
     this.cameras.main.setBackgroundColor(COLORS.fieldA);
@@ -73,10 +82,15 @@ export class GameScene extends Phaser.Scene {
     this.rideLog(dt);
     this.handleInput();
     this.updateRage(dt);
+    this.prey.update(dt, this.row, this.col);
     this.checkCollisions(time);
-    this.updateCamera(dt);
+    if (this.dead) return;
+    this.updateVan(dt);
+    if (this.dead) return;
+    this.updateCamera();
     this.lanes.ensureRange(this.maxRow, this.maxRow + TUNING.lanesAhead);
     this.lanes.cleanupBelow(this.maxRow - TUNING.lanesBehind);
+    this.prey.cleanupBelow(this.maxRow - TUNING.lanesBehind);
     this.hud.update(this.rage.percent, this.rage.unleashed, this.rage.ready, this.score);
   }
 
@@ -133,7 +147,11 @@ export class GameScene extends Phaser.Scene {
     this.col = col;
     this.row = row;
     this.maxRow = Math.max(this.maxRow, row);
-    if (this.lanes.takeSnack(row, col)) this.rage.add(TUNING.ragePerSnack);
+    if (this.prey.tryCatch(row, col)) {
+      this.rage.add(TUNING.ragePerRabbit);
+      this.bonus += TUNING.rabbitPoints;
+      this.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
+    }
   }
 
   private playUnleashFx(): void {
@@ -212,13 +230,26 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: t, y: y - 40, alpha: 0, duration: 700, onComplete: () => t.destroy() });
   }
 
-  /// The camera never scrolls back down, and its slow creep stops players from camping in a safe spot.
-  private updateCamera(dt: number): void {
+  /// The van doesn't start until the first hop, so reading the tutorial is safe.
+  /// With enough rage, it gets wrecked instead of catching you.
+  private updateVan(dt: number): void {
+    this.van.update(dt, this.row, this.player.x, this.maxRow > 0);
+    if (!this.van.reached(this.row)) return;
+    if (this.rage.unleashed && this.rage.percent >= TUNING.vanWreckAt) {
+      this.van.wreck();
+      this.bonus += TUNING.vanWreckPoints;
+      this.cameras.main.shake(300, 0.015);
+      this.floatText(this.van.x, this.van.y - TILE, `VAN WRECKED +${TUNING.vanWreckPoints}`, "#ffe066", 22);
+      return;
+    }
+    this.die("CAUGHT BY ANIMAL CONTROL");
+  }
+
+  /// The camera only follows upward; the van is what forces you to keep moving.
+  private updateCamera(): void {
     const cam = this.cameras.main;
     const target = this.player.y - VIEW_H * 0.65;
     if (target < cam.scrollY) cam.scrollY = Phaser.Math.Linear(cam.scrollY, target, 0.12);
-    if (this.maxRow > 0) cam.scrollY -= TUNING.cameraCreep * dt;
-    if (this.player.y > cam.scrollY + VIEW_H + TILE * 0.5) this.die("TOO SLOW");
   }
 
   /// The guard stops a second collision in the same frame from running this twice.
