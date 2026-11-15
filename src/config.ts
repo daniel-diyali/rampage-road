@@ -56,6 +56,7 @@ export const TUNING = {
   vanWreckPoints: 50,
   vanKnockback: 6,
   vanStunSec: 2.5,
+  hitStopMs: 70,
   hopMs: 110,
   pounceMs: 170,
   backtrackLimit: 4,

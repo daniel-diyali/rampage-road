@@ -1,13 +1,15 @@
 // The scene only coordinates: lanes, rage, and the HUD each live in their own class.
 // What stays here is the cougar itself, input, collisions, and the camera.
 import Phaser from "phaser";
-import { COLS, COLORS, TILE, TUNING, VIEW_H, colX, rowY } from "../config";
+import { COLS, COLORS, TILE, TUNING, VIEW_H, VIEW_W, colX, rowY } from "../config";
 import type { Lane, Mover, VehicleKind } from "../types";
 import { LaneManager } from "../world/LaneManager";
 import { PreyManager } from "../world/PreyManager";
 import { AnimalControl } from "../world/AnimalControl";
 import { RageMeter } from "../systems/RageMeter";
 import { Hud } from "../ui/Hud";
+import { Effects } from "../fx/Effects";
+import { HighScore } from "../systems/HighScore";
 
 const TUTORIAL =
   "ARROWS / WASD to hop\nHunt JACKRABBITS + get CLOSE CALLS for RAGE\nSPACE at 100% to UNLEASH\nAnimal control is right behind you...";
@@ -20,6 +22,11 @@ export class GameScene extends Phaser.Scene {
   private van!: AnimalControl;
   private rage!: RageMeter;
   private hud!: Hud;
+  private fx!: Effects;
+  private rageTint!: Phaser.GameObjects.Rectangle;
+  /** Hop squash is tweened separately so it can stack on top of the rage size. */
+  private squash = { x: 1, y: 1 };
+  private freezeUntil = 0;
   private player!: Phaser.GameObjects.Rectangle;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private closeCalls!: WeakSet<Mover>;
@@ -49,6 +56,9 @@ export class GameScene extends Phaser.Scene {
     this.onLog = false;
     this.dead = false;
     this.closeCalls = new WeakSet();
+    this.squash = { x: 1, y: 1 };
+    this.freezeUntil = 0;
+    this.fx = new Effects(this);
 
     this.prey = new PreyManager(this);
     this.lanes = new LaneManager(this, (lane) => this.prey.maybeSpawn(lane));
@@ -67,16 +77,24 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(COLORS.fieldA);
     this.cameras.main.scrollY = this.player.y - VIEW_H * 0.65;
 
-    this.hud = new Hud(this);
+    this.rageTint = this.add
+      .rectangle(VIEW_W / 2, VIEW_H / 2, VIEW_W, VIEW_H, COLORS.rageGlow)
+      .setScrollFactor(0)
+      .setDepth(90)
+      .setAlpha(0);
+
+    this.hud = new Hud(this, HighScore.get());
     this.hud.showMessage(TUTORIAL);
   }
 
   /// Order matters: things move first, then we check what the cougar ran into.
+  /// During a hit-stop the world pauses for a few frames so big impacts feel heavy.
   update(time: number, delta: number): void {
     if (this.dead) {
       if (Phaser.Input.Keyboard.JustDown(this.keys.R)) this.scene.restart();
       return;
     }
+    if (time < this.freezeUntil) return;
     const dt = delta / 1000;
     this.lanes.update(dt);
     this.rideLog(dt);
@@ -132,6 +150,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.hideMessage();
     this.hopping = true;
     this.onLog = false;
+    this.squash = { x: 0.8, y: 1.25 };
     this.tweens.add({
       targets: this.player,
       x: colX(nc),
@@ -142,29 +161,40 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /// Landing squashes the cougar flat for a moment and kicks up dust,
+  /// which makes each hop feel like it has weight.
   private land(col: number, row: number): void {
     this.hopping = false;
+    this.squash = { x: 1.25, y: 0.8 };
+    this.tweens.add({ targets: this.squash, x: 1, y: 1, duration: 140, ease: "Back.easeOut" });
+    if (this.lanes.get(row)?.type === "field") this.fx.burst(this.player.x, this.player.y + TILE * 0.3, COLORS.hay, 4, 18, 4);
     this.col = col;
     this.row = row;
     this.maxRow = Math.max(this.maxRow, row);
     if (this.prey.tryCatch(row, col)) {
       this.rage.add(TUNING.ragePerRabbit);
       this.bonus += TUNING.rabbitPoints;
-      this.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
+      this.fx.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
+      this.fx.burst(this.player.x, this.player.y, COLORS.rabbit, 8, 30, 5);
     }
   }
 
   private playUnleashFx(): void {
     this.cameras.main.shake(300, 0.012);
     this.cameras.main.flash(180, 255, 60, 60);
-    this.floatText(this.player.x, this.player.y - TILE, "RAMPAGE!", "#ff3b3b", 28);
+    this.fx.floatText(this.player.x, this.player.y - TILE, "RAMPAGE!", "#ff3b3b", 28);
+    this.fx.burst(this.player.x, this.player.y, COLORS.rageGlow, 16, 70, 8);
   }
 
   /// The cougar's size and color are the player's main clue to how much power is left.
+  /// The pulsing red screen tint makes it obvious to anyone watching that rage is on.
   private updateRage(dt: number): void {
     this.rage.update(dt);
-    this.player.setScale(this.rage.scale);
+    const s = this.rage.scale;
+    this.player.setScale(s * this.squash.x, s * this.squash.y);
     this.player.setFillStyle(this.rage.unleashed ? COLORS.rageGlow : COLORS.cougar);
+    const pulse = 0.08 + Math.sin(this.time.now / 120) * 0.04;
+    this.rageTint.setAlpha(this.rage.unleashed ? pulse : 0);
   }
 
   /// A vehicle that just barely passed the cougar counts as a close call and gives rage,
@@ -188,7 +218,7 @@ export class GameScene extends Phaser.Scene {
         if (alreadyPassed && gap < HIT_RANGE + TUNING.closeCallRange && !this.closeCalls.has(m)) {
           this.closeCalls.add(m);
           this.rage.add(TUNING.ragePerCloseCall);
-          this.floatText(px, this.player.y - TILE / 2, "CLOSE CALL!", "#ffe066");
+          this.fx.floatText(px, this.player.y - TILE / 2, "CLOSE CALL!", "#ffe066");
         }
       }
     }
@@ -207,9 +237,11 @@ export class GameScene extends Phaser.Scene {
     const points = TUNING.smashPoints[kind] * this.combo;
     this.bonus += points;
     this.cameras.main.shake(140, 0.008);
+    this.freezeUntil = time + TUNING.hitStopMs;
+    this.fx.burst(m.body.x, m.body.y, m.body.fillColor, 10, 60, 7);
 
     const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
-    this.floatText(m.body.x, m.body.y - TILE / 2, label, "#ffffff");
+    this.fx.floatText(m.body.x, m.body.y - TILE / 2, label, "#ffffff");
     this.tweens.add({
       targets: m.body,
       angle: Phaser.Math.Between(-200, 200),
@@ -221,15 +253,6 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /// Short pop-up text for feedback that should be noticed but not block play.
-  private floatText(x: number, y: number, text: string, color: string, size = 18): void {
-    const t = this.add
-      .text(x, y, text, { fontFamily: "monospace", fontSize: `${size}px`, color, stroke: "#000", strokeThickness: 4 })
-      .setOrigin(0.5)
-      .setDepth(20);
-    this.tweens.add({ targets: t, y: y - 40, alpha: 0, duration: 700, onComplete: () => t.destroy() });
-  }
-
   /// The van doesn't start until the first hop, so reading the tutorial is safe.
   /// With enough rage, it gets wrecked instead of catching you.
   private updateVan(dt: number): void {
@@ -239,7 +262,8 @@ export class GameScene extends Phaser.Scene {
       this.van.wreck();
       this.bonus += TUNING.vanWreckPoints;
       this.cameras.main.shake(300, 0.015);
-      this.floatText(this.van.x, this.van.y - TILE, `VAN WRECKED +${TUNING.vanWreckPoints}`, "#ffe066", 22);
+      this.fx.floatText(this.van.x, this.van.y - TILE, `VAN WRECKED +${TUNING.vanWreckPoints}`, "#ffe066", 22);
+      this.fx.burst(this.van.x, this.van.y, COLORS.van, 14, 80, 8);
       return;
     }
     this.die("CAUGHT BY ANIMAL CONTROL");
@@ -258,7 +282,13 @@ export class GameScene extends Phaser.Scene {
     this.dead = true;
     this.tweens.killTweensOf(this.player);
     this.player.setFillStyle(COLORS.dead);
+    this.rageTint.setAlpha(0);
     this.cameras.main.shake(350, 0.015);
-    this.hud.showMessage(`${reason}\n\nSCORE ${this.score}\n\nPress R to run again`);
+    this.fx.burst(this.player.x, this.player.y, COLORS.cougar, 12, 50, 6);
+
+    const newBest = HighScore.submit(this.score);
+    if (newBest) this.hud.setBest(this.score);
+    const bestLine = newBest ? "NEW BEST!" : `BEST ${HighScore.get()}`;
+    this.hud.showMessage(`${reason}\n\nSCORE ${this.score}\n${bestLine}\n\nPress R to run again`);
   }
 }
