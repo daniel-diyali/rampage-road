@@ -47,34 +47,44 @@ export class AudioManager {
     this.scene.sound.play(key, { volume, detune: Phaser.Math.Between(-80, 80) });
   }
 
-  /// The sound manager outlives scenes, so this checks first to avoid stacking
-  /// a second copy of the music every time the player restarts.
+  /// Music tracks are created once and reused. Creating a new copy each time caused a bug where
+  /// an old stopped copy got found instead of the playing one, so rage music never stopped.
+  private track(key: "music" | "music_rage"): Phaser.Sound.WebAudioSound | Phaser.Sound.HTML5AudioSound | null {
+    if (!this.has(key)) return null;
+    const existing = this.scene.sound.get(key) as Phaser.Sound.WebAudioSound | Phaser.Sound.HTML5AudioSound | null;
+    return existing ?? (this.scene.sound.add(key, { loop: true, volume: MUSIC_VOLUME }) as Phaser.Sound.WebAudioSound);
+  }
+
   /// Browsers block audio until the first key press or click, so while it's locked
   /// the music waits and starts the moment it's allowed.
+  /// Does nothing if the music is already playing or paused for a rampage.
   startMusic(): void {
     if (this.scene.sound.locked) {
       this.scene.sound.once("unlocked", () => this.startMusic());
       return;
     }
-    if (!this.has("music") || this.scene.sound.get("music")?.isPlaying) return;
-    this.scene.sound.play("music", { loop: true, volume: MUSIC_VOLUME });
+    const music = this.track("music");
+    if (music && !music.isPlaying && !music.isPaused) music.play();
   }
 
-  /// Uses the rage track if it exists; otherwise speeds the normal track up a bit.
+  /// Swaps to the rage track while unleashed and back to the normal track after.
+  /// Turning rage off stops every copy of the rage track, so nothing can be left playing.
+  /// Without a rage track, the normal music just speeds up a bit instead.
   setRage(on: boolean): void {
-    const music = this.scene.sound.get("music") as Phaser.Sound.WebAudioSound | null;
-    if (this.has("music_rage")) {
-      const rageTrack = this.scene.sound.get("music_rage");
-      if (on && !rageTrack?.isPlaying) {
-        music?.pause();
-        this.scene.sound.play("music_rage", { loop: true, volume: MUSIC_VOLUME });
-      } else if (!on && rageTrack?.isPlaying) {
-        rageTrack.stop();
-        music?.resume();
-      }
+    const music = this.track("music");
+    const rage = this.track("music_rage");
+    if (!rage) {
+      music?.setRate(on ? 1.15 : 1);
       return;
     }
-    music?.setRate(on ? 1.15 : 1);
+    if (on) {
+      if (music?.isPlaying) music.pause();
+      if (!rage.isPlaying) rage.play();
+      return;
+    }
+    this.scene.sound.getAll("music_rage").forEach((s) => s.stop());
+    if (music?.isPaused) music.resume();
+    else if (music && !music.isPlaying) music.play();
   }
 
   /// Mute applies to every scene, so it carries over between runs.
