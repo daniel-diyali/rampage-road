@@ -61,6 +61,7 @@ export const TUNING = {
   comboWindowMs: 1500,
   pounceRows: 1,
   tierWarnPercent: 6,
+  trainSoundRows: 4,
   vanStartSpeed: 0.55,
   vanAccel: 0.006,
   vanMaxGap: 4.5,

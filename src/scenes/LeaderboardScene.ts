@@ -36,8 +36,14 @@ export class LeaderboardScene extends Phaser.Scene {
       this.drawRows(rows);
     });
 
-    this.input.keyboard!.once("keydown", (e: KeyboardEvent) => {
-      this.scene.start(e.key.toLowerCase() === "t" ? "Title" : "Game");
+    this.input.keyboard!.on("keydown", (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === "m") {
+        this.sound.mute = !this.sound.mute;
+        return;
+      }
+      this.input.keyboard!.removeAllListeners("keydown");
+      this.scene.start(k === "t" ? "Title" : "Game");
     });
     this.input.once("pointerdown", () => this.scene.start("Game"));
   }

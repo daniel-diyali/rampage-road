@@ -6,6 +6,7 @@ import { HighScore } from "../systems/HighScore";
 import { AudioManager } from "../systems/AudioManager";
 import { MAX_NAME_LENGTH, PlayerName } from "../systems/PlayerName";
 import { LeaderboardService } from "../services/LeaderboardService";
+import { TutorialScene } from "./TutorialScene";
 
 export class TitleScene extends Phaser.Scene {
   private typing = false;
@@ -55,7 +56,7 @@ export class TitleScene extends Phaser.Scene {
     this.label(
       cx,
       VIEW_H * 0.6,
-      "ARROWS / WASD  hop\nHUNT jackrabbits + CLOSE CALLS  build rage\nSPACE at 100%  UNLEASH\nDon't let animal control catch you\nM  mute",
+      "ARROWS / WASD  hop\nHUNT jackrabbits + CLOSE CALLS  build rage\nSPACE at 100%  UNLEASH\nDon't let animal control catch you\nM  mute     H  how to play",
       16,
     );
 
@@ -63,6 +64,8 @@ export class TitleScene extends Phaser.Scene {
     this.bestText = this.label(cx, VIEW_H * 0.8, "", 22, "#ffe066");
     this.prompt = this.label(cx, VIEW_H * 0.89, "", 24);
     this.tweens.add({ targets: this.prompt, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
+
+    new AudioManager(this).startMusic();
 
     this.typing = PlayerName.get() === "";
     this.draft = "";
@@ -74,10 +77,15 @@ export class TitleScene extends Phaser.Scene {
     });
   }
 
-  /// While typing, keys build the name; otherwise N renames and anything else starts.
+  /// While typing, keys build the name; otherwise M mutes, N renames, H replays the tutorial, and anything else starts.
   private onKey(e: KeyboardEvent): void {
     if (!this.typing) {
-      if (e.key.toLowerCase() === "n") {
+      if (e.key.toLowerCase() === "m") {
+        this.sound.mute = !this.sound.mute;
+      } else if (e.key.toLowerCase() === "h") {
+        this.input.keyboard!.removeAllListeners("keydown");
+        this.scene.start("Tutorial", { returnToTitle: true });
+      } else if (e.key.toLowerCase() === "n") {
         this.typing = true;
         this.draft = "";
         this.refresh();
@@ -128,9 +136,11 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
-  /// Skips the leaderboard screen entirely when it isn't set up, so there's no dead screen.
+  /// First-time players see the tutorial before their first run.
+  /// The leaderboard screen is skipped entirely when it isn't set up, so there's no dead screen.
   private startGame(): void {
     this.input.keyboard!.removeAllListeners("keydown");
-    this.scene.start(LeaderboardService.enabled ? "Leaderboard" : "Game");
+    if (!TutorialScene.seen) this.scene.start("Tutorial");
+    else this.scene.start(LeaderboardService.enabled ? "Leaderboard" : "Game");
   }
 }

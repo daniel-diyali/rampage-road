@@ -200,7 +200,7 @@ export class GameScene extends Phaser.Scene {
     if (this.prey.tryCatch(row, col)) {
       this.rage.add(TUNING.ragePerRabbit);
       this.bonus += TUNING.rabbitPoints;
-      this.fx.floatText(this.player.x, this.player.y - TILE / 2, "CAUGHT!", "#ffffff");
+      this.fx.floatText(this.player.x, this.player.y - TILE / 2, `CAUGHT! +${TUNING.ragePerRabbit}% RAGE`, "#ffffff");
       this.audio.play("snack");
       this.fx.burst(this.player.x, this.player.y, COLORS.rabbit, 8, 30, 5);
     }
@@ -258,14 +258,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /// Only trains near the cougar ring the bell, otherwise every offscreen rail would be noisy.
+  /// Trains are only heard within a few rows, and get louder the closer they are,
+  /// so far-off tracks don't keep ringing while you're nowhere near them.
   private onTrainWarning(row: number): void {
-    if (Math.abs(row - this.row) <= 6) this.audio.play("train_warning", 0.5);
+    this.playTrainSound("train_warning", 0.6, row);
   }
 
-  /// The rumble of a train going by, for the same nearby trains that rang the bell.
   private onTrainPass(row: number): void {
-    if (Math.abs(row - this.row) <= 6) this.audio.play("train_pass", 0.7);
+    this.playTrainSound("train_pass", 0.8, row);
+  }
+
+  private playTrainSound(key: "train_warning" | "train_pass", maxVolume: number, row: number): void {
+    const distance = Math.abs(row - this.row);
+    if (distance > TUNING.trainSoundRows) return;
+    const closeness = 1 - distance / (TUNING.trainSoundRows + 1);
+    this.audio.play(key, maxVolume * closeness);
   }
 
   /// Vehicle hitboxes are trimmed at both ends so only a real overlap counts as a hit.

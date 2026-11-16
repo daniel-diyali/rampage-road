@@ -4,6 +4,7 @@ import { VIEW_H, VIEW_W } from "./config";
 import { GameScene } from "./scenes/GameScene";
 import { TitleScene } from "./scenes/TitleScene";
 import { LeaderboardScene } from "./scenes/LeaderboardScene";
+import { TutorialScene } from "./scenes/TutorialScene";
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -12,5 +13,5 @@ new Phaser.Game({
   parent: "app",
   backgroundColor: "#14141c",
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [TitleScene, LeaderboardScene, GameScene],
+  scene: [TitleScene, TutorialScene, LeaderboardScene, GameScene],
 });

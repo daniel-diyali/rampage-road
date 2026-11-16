@@ -49,7 +49,13 @@ export class AudioManager {
 
   /// The sound manager outlives scenes, so this checks first to avoid stacking
   /// a second copy of the music every time the player restarts.
+  /// Browsers block audio until the first key press or click, so while it's locked
+  /// the music waits and starts the moment it's allowed.
   startMusic(): void {
+    if (this.scene.sound.locked) {
+      this.scene.sound.once("unlocked", () => this.startMusic());
+      return;
+    }
     if (!this.has("music") || this.scene.sound.get("music")?.isPlaying) return;
     this.scene.sound.play("music", { loop: true, volume: MUSIC_VOLUME });
   }
