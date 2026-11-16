@@ -2,7 +2,7 @@
 
 ## Sounds
 
-- Sound effects were made in [jsfxr](https://sfxr.me/) with help from Claude (Anthropic's AI assistant), which the jam judges okayed.
+- Sound effects were made in [jsfxr](https://sfxr.me/).
 - Music was made in [BeepBox](https://www.beepbox.co/).
 
 ### Freesound
