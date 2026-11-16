@@ -11,13 +11,20 @@ export class LaneManager {
   private scene: Phaser.Scene;
   private onField: (lane: Lane) => void;
   private onTrainWarning: (lane: Lane) => void;
+  private onTrainPass: (lane: Lane) => void;
 
   /// The callbacks let other systems (prey, audio) react to lanes without
   /// LaneManager needing to know about them.
-  constructor(scene: Phaser.Scene, onField: (lane: Lane) => void, onTrainWarning: (lane: Lane) => void) {
+  constructor(
+    scene: Phaser.Scene,
+    onField: (lane: Lane) => void,
+    onTrainWarning: (lane: Lane) => void,
+    onTrainPass: (lane: Lane) => void,
+  ) {
     this.scene = scene;
     this.onField = onField;
     this.onTrainWarning = onTrainWarning;
+    this.onTrainPass = onTrainPass;
   }
 
   get(row: number): Lane | undefined {
@@ -168,6 +175,7 @@ export class LaneManager {
       if (lane.spawnTimer <= 0) {
         const { kind, w } = this.pickMover(lane);
         this.spawn(lane, kind, w);
+        if (kind === "train") this.onTrainPass(lane);
         lane.spawnTimer = lane.type === "rail" ? lane.spawnEvery : (w + this.randomGap(lane)) / lane.speed;
       }
     }
