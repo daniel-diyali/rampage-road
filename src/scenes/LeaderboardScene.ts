@@ -1,5 +1,6 @@
 // Shown right before each run so players see the scores they're trying to beat.
-// It never blocks: any key starts the game even while scores are still loading.
+// It never blocks: any key starts the game even while scores are still loading,
+// and T goes back to the title so players can change their name first.
 import Phaser from "phaser";
 import { PIXEL_SCALE, TILE, VIEW_H, VIEW_W } from "../config";
 import { LeaderboardService } from "../services/LeaderboardService";
@@ -23,8 +24,9 @@ export class LeaderboardScene extends Phaser.Scene {
     this.text(VIEW_W / 2, VIEW_H * 0.1, "TOP COUGARS", 40, "#981e32", 8);
     const status = this.text(VIEW_W / 2, VIEW_H * 0.45, "Loading...", 20);
 
-    const prompt = this.text(VIEW_W / 2, VIEW_H * 0.88, "PRESS ANY KEY TO PLAY", 24);
+    const prompt = this.text(VIEW_W / 2, VIEW_H * 0.86, "PRESS ANY KEY TO PLAY", 24);
     this.tweens.add({ targets: prompt, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
+    this.text(VIEW_W / 2, VIEW_H * 0.92, "T for title / change name", 16);
 
     LeaderboardService.top(10).then((rows) => {
       if (!this.scene.isActive()) return;
@@ -34,7 +36,9 @@ export class LeaderboardScene extends Phaser.Scene {
       this.drawRows(rows);
     });
 
-    this.input.keyboard!.once("keydown", () => this.scene.start("Game"));
+    this.input.keyboard!.once("keydown", (e: KeyboardEvent) => {
+      this.scene.start(e.key.toLowerCase() === "t" ? "Title" : "Game");
+    });
     this.input.once("pointerdown", () => this.scene.start("Game"));
   }
 
