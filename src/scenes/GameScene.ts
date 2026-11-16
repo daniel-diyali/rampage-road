@@ -312,7 +312,7 @@ export class GameScene extends Phaser.Scene {
     this.bonus += points;
     this.cameras.main.shake(140, 0.008);
     this.freezeUntil = time + TUNING.hitStopMs;
-    this.audio.play(kind === "train" ? "smash_train" : "smash", 0.8);
+    this.audio.play(kind === "train" ? "smash_train" : "smash", 0.45);
     this.fx.burst(m.body.x, m.body.y, COLORS[kind], 10, 60, 7);
 
     const label = this.combo > 1 ? `+${points} x${this.combo}` : `+${points}`;
