@@ -79,6 +79,7 @@ export class GameScene extends Phaser.Scene {
       this,
       (lane) => this.prey.maybeSpawn(lane),
       (lane) => this.onTrainWarning(lane.row),
+      (lane) => this.onTrainPass(lane.row),
     );
     this.prey.attach(this.lanes);
     this.lanes.ensureRange(-6, TUNING.lanesAhead);
@@ -260,6 +261,11 @@ export class GameScene extends Phaser.Scene {
   /// Only trains near the cougar ring the bell, otherwise every offscreen rail would be noisy.
   private onTrainWarning(row: number): void {
     if (Math.abs(row - this.row) <= 6) this.audio.play("train_warning", 0.5);
+  }
+
+  /// The rumble of a train going by, for the same nearby trains that rang the bell.
+  private onTrainPass(row: number): void {
+    if (Math.abs(row - this.row) <= 6) this.audio.play("train_pass", 0.7);
   }
 
   /// Vehicle hitboxes are trimmed at both ends so only a real overlap counts as a hit.

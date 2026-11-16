@@ -22,6 +22,7 @@ export type SoundKey =
   | "smash"
   | "smash_train"
   | "train_warning"
+  | "train_pass"
   | "death";
 
 const MUSIC_VOLUME = 0.35;
