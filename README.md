@@ -4,7 +4,7 @@
 
 Made in 48 hours for the [Crimson Game Jam 2026](https://itch.io/jam/crimson-game-jam-2026) (WSU Game Dev Club). Theme: **Unleash the Beast**.
 
-▶️ **Play in your browser:** _add your itch.io link here_
+▶️ **Play in your browser:** https://danieldiyali.itch.io/rampage-road
 
 ---
 
